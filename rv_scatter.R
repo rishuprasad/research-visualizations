@@ -5,13 +5,15 @@ library(performance)
 data(diamonds)
 head(diamonds)
 diam <- diamonds %>% slice(sample(500, size = 200))
+crabs <- read.table("https://users.stat.ufl.edu/~aa/cat/data/Crabs.dat", header = T)
+crabs
 
-
-rv_scatterplot <- function(data = NULL, 
+rv_scatterplot <- function(data = data, 
                            x, 
                            y,
                            model = NULL,
-                           modelMethod = NULL,
+                           modelFamily = gaussian,
+                           modelLink = identity,
                            bestTransformation = F,
                            modelWeights = NULL,
                            test = NULL,
@@ -21,7 +23,7 @@ rv_scatterplot <- function(data = NULL,
                            labelx = .05,
                            labely = .95,
                            just = "left",
-                           colour = NULL,
+                           colour = "black",
                            fill = NULL,
                            blocks = NULL,
                            wrap_by=NULL,
@@ -84,52 +86,46 @@ rv_scatterplot <- function(data = NULL,
   # First checks if user specified model to be nonempty, skips modeling if it is empty
   if (!is.null(model)) {
     
-    # If model input is TRUE, then it'll try various models with the data, if the input 
-    # is a model object then it will evaluate the model object
-    if (is_true(model))  {
-      
-      # If model method is defined, use that method, if not, it will choose simple linear
-      # model, and in both cases, 
-      # if bestTransformation is T, it will do various transformations, fit different models
-      # and pick the "best model" based on R^2 
-      if (is.null(modelMethod)) {
-        
-        # Create model expression 
-        model.result.expr <- expr(glm())
-        model.result.expr$formula = {{y}} ~ {{x}}
-        model.result.expr$family = gaussian(link = "identity")
-        print(model)
-        
-        # Evaluate model expression
-        result <- eval_tidy(model.result.expr, data = data)
-        print(summary(result))
-        
-        # model.summary <- summary(model)
-        # label.p.value <- signif(as.numeric(model.summary$coefficients[2, 4]), 3)
-        
-        # print(summary(model)$call)
-        
-      } else if (!is.null(modelMethod)) {
-        
-      }
-      
-    } else if (!is.null(model) & class(model)[1] == "glm" | class(model)[2] == "lm") {
-      
-      # Wald Test for significance of explanatory variable #
-      model.summary <- summary(model)
-      label.p.value <- signif(as.numeric(model.summary$coefficients[2, 4]), 3)
-      
-      print(summary(model))
-      
-      
-      # Performance checking via the performance package
-      print(check_heteroscedasticity(model))
-      print(check_normality(model))
-      print(check_outliers(model))
-      
+    
+    
+    # At this point, the user has input something in the model, intended to be glm or lm or really
+    # anything of that particular type, if the family
+    # is specified, then it uses that family, otherwise, it will just do a simple linear model
+    
+    # Prepare model expression
+    model.expr <- enexpr(model)
+    family <- enexpr(modelFamily)
+    x.var <- ensym(x)
+    y.var <- ensym(y)
+    link = enexpr(modelLink)
+    
+    
+    # Create model expression
+    model.result.expr <- expr((!!model.expr)((!!y.var) ~ (!!x.var), family = (!!family)((!!link)), data = data))
+    
+
+    # Evaluate model expression
+    result <- eval_tidy(model.result.expr)
+    
+    
+    # Model output
+    model.summary <- summary(result)
+    model.summary$call <- expr(glm(y ~ x, data = data))
+    print(model.summary)
+    label.p.value <- signif(as.numeric(model.summary$coefficients[2, 4]), 3)
+    
+    # Model Checking
+    if (as.character(substitute(modelFamily)) == "gaussian") {
+      print(performance::check_heteroscedasticity(result))
+      print(performance::check_normality(result))
+      print(performance::check_outliers(result))
+    } else if (as.character(substitute(modelFamily)) == "binomial") {
+      print(performance::performance_hosmer(result))
+      print(performance::check_outliers(result))
     }
     
-  } 
+    
+  }
   
   
 
@@ -169,6 +165,14 @@ rv_scatterplot <- function(data = NULL,
   # If there was a model
   if (!is.null(model)) {
     gg = gg + annotation_custom(label)
+    if (as.character(substitute(modelFamily)) == "gaussian") {
+      gg = gg + stat_smooth(method = "glm", se = F, 
+                            method.args = list(family = gaussian))
+    } else if (as.character(substitute(modelFamily)) == "binomial") {
+      gg = gg + stat_smooth(method = "glm", se = F, 
+                            method.args = list(family = binomial))
+    }
+    
   }
   
   # Plot 
@@ -178,18 +182,36 @@ rv_scatterplot <- function(data = NULL,
 }
 
 
-rv_scatterplot(diam, x, depth, model = T,
+
+# Caveats, if you do logistic regression, you'll need to specify the modelLink, I could do like an
+# if statement to change it, but kinda don't want to right now.
+
+rv_scatterplot(crabs, weight, y, model = glm, modelFamily = binomial, modelLink = logit,
                colour = "blue") +
   theme_classic()
 
+rv_scatterplot(diam, depth, y, model = glm, modelFamily = gaussian,
+               colour = "blue") +
+  theme_classic()
 
+rv_scatterplot(diam, x, y, model = glm, modelFamily = gaussian,
+               colour = "blue") +
+  theme_classic()
 
+rv_scatterplot(diam, depth, x, test = t.test, paired = T, colour = 'purple') + theme_classic()
 
+rv_scatterplot(diam, depth, x, test = t.test, paired = T,
+               mu = 3, colour = 'purple') + theme_classic()
 
+rv_scatterplot(diam, x, y, test = wilcox.test, colour = "orange") + theme_classic()
 
+rv_scatterplot(diam, carat, price, test = cor.test, method = "kendall", colour = "blue")
 
+rv_scatterplot(diam, carat, x, test = cor.test, method = "kendall", colour = "blue")
 
+rv_scatterplot(diam, carat, x, test = cor.test, method = "pearson")
 
+rv_scatterplot(diam, carat, x, test = cor.test, method = "pearson", colour = "yellow")
 
 
 
